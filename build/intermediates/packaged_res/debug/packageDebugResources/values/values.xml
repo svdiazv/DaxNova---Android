@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_700">#6A1B9A</color>
+    <color name="purple_light">#F3E5F5</color>
+    <style name="Theme.DAXNOVA" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#6A1B9A</item>
+        <item name="android:navigationBarColor">#120A17</item>
+    </style>
+    <style name="Theme.DAXNOVA.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/purple_light</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/logo_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.DAXNOVA</item>
+    </style>
+</resources>
