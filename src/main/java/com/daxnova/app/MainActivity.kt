@@ -1,9 +1,20 @@
 package com.daxnova.app
 
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import retrofit2.HttpException
+
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.lazy.items
+
 import android.os.Bundle
 import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.clickable
+
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.material.icons.filled.Delete
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -155,13 +166,8 @@ fun App() {
         }
 
         composable("inventario") {
-            Module(
-                "Inventario",
-                "Controla productos, existencias y movimientos.",
-                nav
-            )
+            InventarioScreen(nav)
         }
-
         composable("pagos") {
             Module(
                 "Pagos e ingresos",
@@ -252,15 +258,167 @@ fun Register(nav: NavHostController) {
 fun Login(nav: NavHostController) {
     var email by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
+    var cargando by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
     Column(Modifier.fillMaxSize().padding(24.dp)) {
         Header("Iniciar sesión", nav)
         Field("Correo", email) { email = it }
         Field("Contraseña", pass, isPassword = true) { pass = it }
         Spacer(Modifier.height(18.dp))
-        Button({ nav.navigate("dashboard") }, Modifier.fillMaxWidth()) { Text("Entrar") }
+
+        if (error != null) {
+            Text(error!!, color = Color.Red)
+            Spacer(Modifier.height(8.dp))
+        }
+
+        Button(
+            onClick = {
+                error = null
+                cargando = true
+                scope.launch {
+                    try {
+                        val respuesta = RetrofitClient.api.login(LoginRequest(email, pass))
+                        Sesion.token = respuesta.accessToken
+                        nav.navigate("dashboard")
+                    } catch (e: HttpException) {
+                        error = "Correo o contraseña incorrectos"
+                    } catch (e: Exception) {
+                        error = "No se pudo conectar al servidor: ${e.message}"
+                    } finally {
+                        cargando = false
+                    }
+                }
+            },
+            enabled = !cargando,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (cargando) "Ingresando..." else "Entrar")
+        }
     }
 }
 
+@Composable
+fun InventarioScreen(nav: NavHostController) {
+    val insumos = remember { mutableStateListOf<InsumoApi>() }
+    var cargando by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val resultado = RetrofitClient.api.listarInsumos(Sesion.tokenConBearer())
+            insumos.clear()
+            insumos.addAll(resultado)
+        } catch (e: Exception) {
+            error = "No se pudieron cargar los insumos: ${e.message}"
+        } finally {
+            cargando = false
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Header("Inventario", nav)
+        Spacer(Modifier.height(12.dp))
+
+        FormularioInsumo(insumos = insumos)
+        Spacer(Modifier.height(16.dp))
+
+        when {
+            cargando -> CircularProgressIndicator()
+            error != null -> Text(error!!, color = Color.Red)
+            insumos.isEmpty() -> Text("Todavía no tienes insumos registrados.")
+            else -> LazyColumn {
+                items(insumos, key = { it.id }) { insumo ->
+                    InsumoRow(insumo = insumo, insumos = insumos)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FormularioInsumo(insumos: SnapshotStateList<InsumoApi>) {
+    var nombre by remember { mutableStateOf("") }
+    var cantidad by remember { mutableStateOf("") }
+    var minimo by remember { mutableStateOf("") }
+    var precio by remember { mutableStateOf("") }
+    var guardando by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Agregar insumo", fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Field("Nombre", nombre) { nombre = it }
+            Field("Cantidad", cantidad) { cantidad = it }
+            Field("Mínimo", minimo) { minimo = it }
+            Field("Precio unitario", precio) { precio = it }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                enabled = !guardando && nombre.isNotBlank(),
+                onClick = {
+                    guardando = true
+                    scope.launch {
+                        try {
+                            val nuevo = RetrofitClient.api.crearInsumo(
+                                Sesion.tokenConBearer(),
+                                InsumoCreateRequest(
+                                    nombre = nombre,
+                                    categoria = null,
+                                    cantidad = cantidad.toIntOrNull() ?: 0,
+                                    minimo = minimo.toIntOrNull() ?: 0,
+                                    precioUnitario = precio.toDoubleOrNull() ?: 0.0
+                                )
+                            )
+                            insumos.add(nuevo)
+                            nombre = ""; cantidad = ""; minimo = ""; precio = ""
+                        } catch (e: Exception) {
+                            // En un paso futuro podemos mostrar este error en pantalla
+                        } finally {
+                            guardando = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (guardando) "Guardando..." else "Agregar")
+            }
+        }
+    }
+}
+@Composable
+fun InsumoRow(insumo: InsumoApi, insumos: SnapshotStateList<InsumoApi>) {
+    val bajoStock = insumo.cantidad <= insumo.minimo
+    val scope = rememberCoroutineScope()
+
+    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(insumo.nombre)
+                Text(
+                    "${insumo.cantidad}/${insumo.minimo}",
+                    color = if (bajoStock) Color.Red else PurpleDark,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            IconButton(onClick = {
+                scope.launch {
+                    try {
+                        RetrofitClient.api.borrarInsumo(Sesion.tokenConBearer(), insumo.id)
+                        insumos.removeIf { it.id == insumo.id }
+                    } catch (e: Exception) { }
+                }
+            }) {
+                Icon(Icons.Filled.Delete, contentDescription = "Borrar")
+            }
+        }
+    }
+}
 @Composable
 fun Field(
     label: String,
@@ -334,7 +492,6 @@ fun Dashboard(nav: NavHostController) {
             }
 
             item { Metric("👥", "Clientes", "128") }
-            item { Metric("📦", "Productos", "246") }
             item { Metric("💰", "Ingresos del mes", "$ 8.450.000") }
             item { Metric("📅", "Citas pendientes", "12") }
 
